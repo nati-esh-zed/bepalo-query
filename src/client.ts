@@ -12,7 +12,9 @@ import type {
   SelectorPatch,
   SelectorPost,
   Table,
-} from "./query.ts";
+} from "./types.ts";
+
+export type { PickTables } from "./types.ts";
 
 type InferSelect<T extends Table | unknown> = T extends Table
   ? InferSelectModel<T>
@@ -36,54 +38,188 @@ export type InferInsertModels<Schema extends Record<string, Table | unknown>> =
     >;
   };
 
+export type ExtractQueryRelationsWithOnly<
+  QueryParams extends true | { with?: any } | undefined,
+> = QueryParams extends {
+  with?: infer With extends Record<string, { with?: any } | unknown>;
+}
+  ? {
+    [K in keyof With]?: With[K] extends true | undefined | { with?: any }
+    ? ExtractQueryRelationsWithOnly<With[K]>
+    : never;
+  }
+  : never;
+
+export type InferQueryRelationsWithOnly<
+  K extends keyof Database["query"],
+  Database extends {
+    query: Record<
+      keyof Database["query"],
+      { findFirst: (...args: any[]) => any }
+    >;
+  },
+> = ExtractQueryRelationsWithOnly<
+  Parameters<Database["query"][K]["findFirst"]>[0]
+>;
+
+type _ClientWithTables<
+  Database extends { query: any },
+  K extends keyof Database["query"] = keyof Database["query"],
+> = InferQueryRelationsWithOnly<K, Database>;
+
+export type ClientWithTables<
+  Database extends { query: any },
+  tableId extends keyof Database["query"],
+> = _ClientWithTables<Database, tableId>;
+
+export type ExtractQueryRelationsWithOnlySelect<
+  QueryParams extends true | { with?: any } | undefined,
+> = QueryParams extends {
+  with?: infer With extends Record<string, { with?: any } | unknown>;
+}
+  ? {
+    [K in keyof With]?: With[K] extends true | undefined | { with?: any }
+    ? ExtractQueryRelationsWithOnlySelect<With[K]>
+    : never;
+  }
+  : never;
+
+export type InferQueryRelationsWithOnlySelect<
+  K extends keyof Database["query"],
+  Database extends {
+    query: Record<
+      keyof Database["query"],
+      { findFirst: (...args: any[]) => any }
+    >;
+  },
+> = ExtractQueryRelationsWithOnlySelect<
+  Parameters<Database["query"][K]["findFirst"]>[0]
+>;
+
+export type _ClientWithSelect<
+  Database extends { query: any },
+  Schema extends Record<string, Table>,
+  tableId extends keyof Database["query"],
+  Select extends BepaloQueryWith<SelectorGet, Database, Schema, tableId>,
+> = (tableId extends keyof Schema
+  ? {
+    [K in keyof InferSelectModel<
+      Schema[tableId]
+    > as K extends keyof NonNullable<Select["columns"]>
+    ? K
+    : never]: K extends keyof InferSelectModel<Schema[tableId]>
+    ? K extends keyof NonNullable<Select["columns"]>
+    ? InferSelectModel<Schema[tableId]>[K]
+    : never
+    : never;
+  }
+  : never) & {
+    [K in keyof NonNullable<Select["with"]> as K extends keyof Schema
+    ? K
+    : never]: K extends keyof Schema
+    ? NonNullable<Select["with"]>[K] extends BepaloQueryWith<
+      SelectorGet,
+      Database,
+      Schema,
+      K
+    >
+    ? _ClientWithSelect<Database, Schema, K, NonNullable<Select["with"]>[K]>
+    : never
+    : never;
+  };
+
+export type ClientWithSelect<
+  Database extends { query: any },
+  Schema extends Record<string, Table>,
+  tableId extends keyof Database["query"],
+  Select extends BepaloQueryWith<SelectorGet, Database, Schema, tableId>,
+> = _ClientWithSelect<Database, Schema, tableId, Select>;
+
 export type InferResponseType<
   resourceId extends string,
+  Database extends { query: any },
   Schema extends Record<string, Table | unknown>,
-  tableId extends keyof Schema,
+  tableId extends keyof Database["query"],
+  withTables extends ClientWithTables<Database, tableId> = ClientWithTables<
+    Database,
+    tableId
+  >,
 > = {
   total?: number;
   rowsAffected?: number;
 } & (
-  | ({ count: number } & {
+    | {
       [R in resourceId]:
-        | InferSelectModel<
-            Schema[tableId] extends Table ? Schema[tableId] : never
-          >[]
-        | null;
-    })
-  | {
-      [R in resourceId]: InferSelectModel<
+      | (InferSelectModel<
         Schema[tableId] extends Table ? Schema[tableId] : never
-      > | null;
+      > &
+        withTables)
+      | null;
     }
-);
+    | ({ count: number } & {
+      [R in resourceId]:
+      | (InferSelectModel<
+        Schema[tableId] extends Table ? Schema[tableId] : never
+      > &
+        withTables)[]
+      | null;
+    })
+  );
 
 export type InferResponseTypeFirst<
   resourceId extends string,
+  Database extends { query: any },
   Schema extends Record<string, Table | unknown>,
-  tableId extends keyof Schema,
+  tableId extends keyof Database["query"],
+  withTables extends ClientWithTables<Database, tableId> = ClientWithTables<
+    Database,
+    tableId
+  >,
 > = {
   total?: number;
-  rowsAffected?: number;
 } & {
-  [R in resourceId]: InferSelectModel<
-    Schema[tableId] extends Table ? Schema[tableId] : never
-  > | null;
-};
+    [R in resourceId]:
+    | (InferSelectModel<
+      Schema[tableId] extends Table ? Schema[tableId] : never
+    > &
+      withTables)
+    | null;
+  };
 
 export type InferResponseTypeMany<
   resourceId extends string,
+  Database extends { query: any },
   Schema extends Record<string, Table | unknown>,
-  tableId extends keyof Schema,
+  tableId extends keyof Database["query"],
+  withTables extends ClientWithTables<Database, tableId> = ClientWithTables<
+    Database,
+    tableId
+  >,
 > = {
   total?: number;
   rowsAffected?: number;
 } & ({ count: number } & {
   [R in resourceId]:
-    | InferSelectModel<
-        Schema[tableId] extends Table ? Schema[tableId] : never
-      >[]
-    | null;
+  | (InferSelectModel<
+    Schema[tableId] extends Table ? Schema[tableId] : never
+  > &
+    withTables)[]
+  | null;
+});
+
+export type InferResponseTypeManySelect<
+  resourceId extends string,
+  Database extends { query: any },
+  Schema extends Record<string, Table>,
+  tableId extends keyof Database["query"],
+  Select extends BepaloQueryWith<SelectorGet, Database, Schema, tableId>,
+> = {
+  total?: number;
+  rowsAffected?: number;
+} & ({ count: number } & {
+  [R in resourceId]:
+  | ClientWithSelect<Database, Schema, tableId, Select>[]
+  | null;
 });
 
 type BepaloQueryWith<
@@ -94,12 +230,12 @@ type BepaloQueryWith<
 > = Omit<T, "columns" | "with"> & {
   columns?: Partial<Record<keyof InferSelectModel<Schema[K]>, boolean>>;
 } & {
-  [W in keyof T as W extends "with" ? W : never]: {
-    [N in keyof Schema as N extends keyof InferQueryRelations<K, Database>
+    [W in keyof T as W extends "with" ? W : never]: {
+      [N in keyof Schema as N extends keyof InferQueryRelations<K, Database>
       ? N
       : never]?: BepaloQueryWith<T, Database, Schema, N>;
+    };
   };
-};
 
 const URI_CC0 = "&".charCodeAt(0);
 const URI_CC1 = "=".charCodeAt(0);
@@ -173,7 +309,7 @@ export class BepaloQueryBuilder<
   Database extends { query: any },
   _Tables extends Record<string, Table> = PickTables<Schema>,
 > {
-  constructor() {}
+  constructor() { }
 
   Get<N extends keyof _Tables>(
     options?: Omit<GetQuery, "select"> & {
@@ -295,12 +431,14 @@ export class BepaloQueryClient<
 
   /////////////////////////////////////////////////////////////////////////k
   async Get<
-    N extends keyof _Tables,
+    N extends keyof Database["query"],
     resourceId extends string,
-    ReturnType = InferResponseType<resourceId, _Tables, N>,
+    ReturnType = InferResponseType<resourceId, Database, Schema, N>,
   >(
     url: QueryURL<QueryPath, resourceId>,
-    options?: Parameters<typeof this.queryBuilder.Get<N>>[0],
+    options?: Omit<GetQuery, "select"> & {
+      select?: BepaloQueryWith<SelectorGet, Database, _Tables, N>;
+    },
     init?: RequestInit,
   ): Promise<ReturnType> {
     const params = this.queryBuilder.Get<N>(options);
@@ -309,12 +447,14 @@ export class BepaloQueryClient<
   }
 
   async GetFirst<
-    N extends keyof _Tables,
+    N extends keyof Database["query"],
     resourceId extends string,
-    ReturnType = InferResponseTypeFirst<resourceId, _Tables, N>,
+    ReturnType = InferResponseTypeFirst<resourceId, Database, Schema, N>,
   >(
     url: QueryURL<QueryPath, resourceId>,
-    options?: Omit<Parameters<typeof this.queryBuilder.Get<N>>[0], "findFirst">,
+    options?: Omit<GetQuery, "select" | "findFirst"> & {
+      select?: BepaloQueryWith<SelectorGet, Database, _Tables, N>;
+    },
     init?: RequestInit,
   ): Promise<ReturnType> {
     const params = this.queryBuilder.Get<N>({ ...options, findFirst: true });
@@ -323,12 +463,23 @@ export class BepaloQueryClient<
   }
 
   async GetMany<
-    N extends keyof _Tables,
     resourceId extends string,
-    ReturnType = InferResponseTypeMany<resourceId, _Tables, N>,
+    N extends keyof Database["query"],
+    Options extends Omit<GetQuery, "select"> & {
+      select?: BepaloQueryWith<SelectorGet, Database, _Tables, N>;
+    } = Omit<GetQuery, "select"> & {
+      select?: BepaloQueryWith<SelectorGet, Database, _Tables, N>;
+    },
+    ReturnType = InferResponseTypeManySelect<
+      resourceId,
+      Database,
+      _Tables,
+      N,
+      NonNullable<Options["select"]>
+    >,
   >(
     url: QueryURL<QueryPath, resourceId>,
-    options?: Omit<Parameters<typeof this.queryBuilder.Get<N>>[0], "findFirst">,
+    options?: Options,
     init?: RequestInit,
   ): Promise<ReturnType> {
     const params = this.queryBuilder.Get<N>(options);
@@ -337,12 +488,14 @@ export class BepaloQueryClient<
   }
 
   async Post<
-    N extends keyof _Tables,
+    N extends keyof Database["query"],
     resourceId extends string,
-    ReturnType = InferResponseTypeMany<resourceId, _Tables, N>,
+    ReturnType = InferResponseTypeMany<resourceId, Database, Schema, N>,
   >(
     url: QueryURL<QueryPath, resourceId>,
-    options?: Parameters<typeof this.queryBuilder.Post<N>>[0],
+    options?: Omit<PostQuery, "select"> & {
+      select?: BepaloQueryWith<SelectorPost, Database, _Tables, N>;
+    },
     init?: RequestInit,
   ): Promise<ReturnType> {
     const params = this.queryBuilder.Post<N>(options);
@@ -351,12 +504,14 @@ export class BepaloQueryClient<
   }
 
   async Patch<
-    N extends keyof _Tables,
+    N extends keyof Database["query"],
     resourceId extends string,
-    ReturnType = InferResponseTypeMany<resourceId, _Tables, N>,
+    ReturnType = InferResponseTypeMany<resourceId, Database, Schema, N>,
   >(
     url: `${string | ""}${QueryPath}/${resourceId}${`#${string}` | ""}${`?${string}` | ""}`,
-    options?: Parameters<typeof this.queryBuilder.Patch<N>>[0],
+    options?: Omit<PatchQuery, "select"> & {
+      select?: BepaloQueryWith<SelectorPatch, Database, _Tables, N>;
+    },
     init?: RequestInit,
   ): Promise<ReturnType> {
     const params = this.queryBuilder.Patch<N>(options);
@@ -365,12 +520,14 @@ export class BepaloQueryClient<
   }
 
   async Delete<
-    N extends keyof _Tables,
+    N extends keyof Database["query"],
     resourceId extends string,
-    ReturnType = InferResponseTypeMany<resourceId, _Tables, N>,
+    ReturnType = InferResponseTypeMany<resourceId, Database, Schema, N>,
   >(
     url: QueryURL<QueryPath, resourceId>,
-    options?: Parameters<typeof this.queryBuilder.Delete<N>>[0],
+    options?: Omit<DeleteQuery, "select"> & {
+      select?: BepaloQueryWith<SelectorDelete, Database, _Tables, N>;
+    },
     init?: RequestInit,
   ): Promise<ReturnType> {
     const params = this.queryBuilder.Delete<N>(options);

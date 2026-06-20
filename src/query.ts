@@ -1,842 +1,40 @@
-import { ArkErrors, scope, type } from "arktype";
-import { RJSON } from "@bepalo/rjson";
+import { ArkErrors } from "arktype";
 import {
-  getOperators,
-  type SQL,
-  type InferSelectModel,
-  type Operators,
-} from "drizzle-orm";
+  type CTXACLCommon,
+  type CTXACLResult,
+  type CTXBody,
+  type CTXDeleteQuery,
+  type CTXGetQuery,
+  type CTXOptionsQuery,
+  type CTXPatchBody,
+  type CTXPatchQuery,
+  type CTXPostBody,
+  type CTXPostQuery,
+  type InferQuery,
+  type InferTransaction,
+  type PickTables,
+  type RequestHandler,
+  type Routes,
+  type Table,
+  type ACL,
+  type ACLEntry,
+  TOptionsQuery,
+  TGetQuery,
+  CTXTX,
+  TPostQuery,
+  TPatchQuery,
+  TDeleteQuery,
+} from "./types.ts";
+
 import {
-  cancelRequestBody,
-  validateAclEntry,
-  validateTable,
-  getAclRule,
-  resolveAclSelector,
-  applyBodyTransform,
-} from "./utils";
-
-export enum Status {
-  _100_Continue = 100,
-  _101_SwitchingProtocols = 101,
-  _102_Processing = 102,
-  _103_EarlyHints = 103,
-  _200_OK = 200,
-  _201_Created = 201,
-  _202_Accepted = 202,
-  _203_NonAuthoritativeInformation = 203,
-  _204_NoContent = 204,
-  _205_ResetContent = 205,
-  _206_PartialContent = 206,
-  _207_MultiStatus = 207,
-  _208_AlreadyReported = 208,
-  _226_IMUsed = 226,
-  _300_MultipleChoices = 300,
-  _301_MovedPermanently = 301,
-  _302_Found = 302,
-  _303_SeeOther = 303,
-  _304_NotModified = 304,
-  _305_UseProxy = 305,
-  _307_TemporaryRedirect = 307,
-  _308_PermanentRedirect = 308,
-  _400_BadRequest = 400,
-  _401_Unauthorized = 401,
-  _402_PaymentRequired = 402,
-  _403_Forbidden = 403,
-  _404_NotFound = 404,
-  _405_MethodNotAllowed = 405,
-  _406_NotAcceptable = 406,
-  _407_ProxyAuthenticationRequired = 407,
-  _408_RequestTimeout = 408,
-  _409_Conflict = 409,
-  _410_Gone = 410,
-  _411_LengthRequired = 411,
-  _412_PreconditionFailed = 412,
-  _413_PayloadTooLarge = 413,
-  _414_URITooLong = 414,
-  _415_UnsupportedMediaType = 415,
-  _416_RangeNotSatisfiable = 416,
-  _417_ExpectationFailed = 417,
-  _418_IMATeapot = 418,
-  _421_MisdirectedRequest = 421,
-  _422_UnprocessableEntity = 422,
-  _423_Locked = 423,
-  _424_FailedDependency = 424,
-  _425_TooEarly = 425,
-  _426_UpgradeRequired = 426,
-  _428_PreconditionRequired = 428,
-  _429_TooManyRequests = 429,
-  _431_RequestHeaderFieldsTooLarge = 431,
-  _451_UnavailableForLegalReasons = 451,
-  _500_InternalServerError = 500,
-  _501_NotImplemented = 501,
-  _502_BadGateway = 502,
-  _503_ServiceUnavailable = 503,
-  _504_GatewayTimeout = 504,
-  _505_HTTPVersionNotSupported = 505,
-  _506_VariantAlsoNegotiates = 506,
-  _507_InsufficientStorage = 507,
-  _508_LoopDetected = 508,
-  _510_NotExtended = 510,
-  _511_NetworkAuthenticationRequired = 511,
-  _419_PageExpired = 419,
-  _420_EnhanceYourCalm = 420,
-  _450_BlockedbyWindowsParentalControls = 450,
-  _498_InvalidToken = 498,
-  _499_TokenRequired = 499,
-  _509_BandwidthLimitExceeded = 509,
-  _526_InvalidSSLCertificate = 526,
-  _529_Siteisoverloaded = 529,
-  _530_Siteisfrozen = 530,
-  _598_NetworkReadTimeoutError = 598,
-  _599_NetworkConnectTimeoutError = 599,
-}
-
-/**
- * Standard HTTP methods supported by the router.
- * These methods correspond to HTTP/1.1 request methods.
- *
- * @typedef {"HEAD"|"OPTIONS"|"GET"|"POST"|"PUT"|"PATCH"|"DELETE"} HttpMethod
- *
- * @example
- * const method: HttpMethod = "GET";
- * const method: HttpMethod = "POST";
- */
-type HttpMethod =
-  | "HEAD"
-  | "OPTIONS"
-  | "GET"
-  | "POST"
-  | "PUT"
-  | "PATCH"
-  | "DELETE";
-
-/**
- * Request handler type
- * @callback RequestHandler
- * @template Context
- * @param {Request} req - The incoming request
- * @param {Context} ctx - The request context
- * @returns {Response|void|Promise<Response|void>} A Response, or void to continue to next handler
- */
-export interface RequestHandler<Context = any> {
-  (req: Request, ctx: Context): Response | void | Promise<Response | void>;
-}
-
-/**
- * Creates a JSON Response.
- * Defaults to status 200 and 'application/json; charset=utf-8' content-type if not specified.
- * Uses Response.json() internally which automatically serializes the body.
- * @param {any} body - The data to serialize as JSON
- * @param {ResponseInit} [init] - Additional response initialization options
- * @returns {Response} A Response object with application/json content-type
- * @example
- * json({ message: "Success" });
- * json({ error: "Not found" }, { status: 404 });
- */
-const json = (payload: any, init?: ResponseInit) => {
-  return Response.json(payload, init);
-};
-
-/**
- * Creates a Response with the specified status code.
- * Defaults to 'text/plain; charset=utf-8' content-type if not provided in init.headers.
- * @param {number} status - The HTTP status code
- * @param {string|null} [content] - The response body content
- * @param {ResponseInit} [init] - Additional response initialization options
- * @returns {Response} A Response object
- * @example
- * status(200, "Success");
- * status(404, "Not Found");
- * status(204, null); // No content response
- */
-export const status = (
-  status: number,
-  content?: string | null,
-  init?: ResponseInit,
-): Response => {
-  return new Response(content !== undefined ? content : null, {
-    ...init,
-    status,
-  });
-};
-
-export type Table = {
-  _: any;
-  $inferSelect: any;
-  $inferInsert: any;
-  getSQL: any;
-};
-
-export class HttpError extends Error {
-  status: number = 500;
-  constructor(message: string, status: number) {
-    super(message);
-    this.status = status || 500;
-  }
-}
-
-export const operators: Operators = getOperators();
-
-export type BASIC_ROLES = "guest" | "mine" | "all";
-
-export type InferTransaction<
-  Database extends {
-    transaction: any;
-  },
-> = Database extends {
-  transaction: infer TransactionFn extends { (...args: any[]): any };
-}
-  ? Parameters<Parameters<TransactionFn>[0]>[0]
-  : never;
-export type InferQuery<Database extends { query: any }> = Database extends {
-  query: infer TQuery;
-}
-  ? TQuery
-  : never;
-
-export type ColumnSetting<T extends Table> = {
-  mode?: boolean | number;
-  columns?: Set<keyof InferSelectModel<T>>;
-};
-
-export type CTXACLCommon<Role> = {
-  resourceId: string;
-  findFirst?: boolean;
-  userRole?: Role;
-};
-
-export type CTXTX<Transaction> = {
-  tx: Transaction;
-};
-
-export type CTXACLResult<
-  Schema extends Record<string, Table | unknown>,
-  K extends keyof Schema,
-> = {
-  result?: {
-    rows?:
-      | (Schema[K] extends Table
-          ?
-              | Partial<InferSelectModel<Schema[K]>>[]
-              | (Partial<InferSelectModel<Schema[K]>> &
-                  Record<string, Partial<InferSelectModel<Table>>>)[]
-          : unknown[])
-      | null;
-    count?: number;
-    total?: number;
-    rowsAffected?: number;
-  };
-};
-
-export type PickTables<Schema extends Record<string, Table | unknown>> = {
-  [K in keyof Schema as Schema[K] extends Table
-    ? K
-    : never]: Schema[K] extends Table ? Schema[K] : never;
-};
-
-export type InferQueryRelationsWith<QueryParams extends { with: any }> =
-  QueryParams extends { with?: infer With } ? With : never;
-
-export type InferQueryRelations<
-  K extends keyof Database["query"],
-  Database extends {
-    query: Record<
-      keyof Database["query"],
-      { findFirst: (...args: any[]) => any }
-    >;
-  },
-> = InferQueryRelationsWith<
-  NonNullable<Parameters<Database["query"][K]["findFirst"]>[0]>
->;
-
-export type _ACLWith<
-  Context,
-  Schema extends Record<string, Table>,
-  Database extends { transaction: any; query: any },
-  Transaction extends InferTransaction<Database>,
-  Query extends InferQuery<Database>,
-  K extends keyof Schema,
-  P extends keyof _ACLWith<
-    Context,
-    Schema,
-    Database,
-    Transaction,
-    Query,
-    K,
-    | "forbidQuery"
-    | "maxLimit"
-    | "maxDepth"
-    | "select"
-    | "extras"
-    | "where"
-    | "orderBy"
-    | "with"
-    | "validateBody"
-    | "injectBody"
-    | "beforeQuery"
-    | "afterQuery"
-    | "onQueryError"
-  >,
-> = {
-  forbidQuery?: {
-    columns?: boolean;
-    offset?: boolean;
-    limit?: boolean;
-    where?: boolean;
-    orderBy?: boolean;
-    with?: boolean;
-  };
-
-  maxLimit?: number | null;
-  maxDepth?: number | null;
-
-  select?: ColumnSetting<Schema[K]> | boolean;
-
-  extras?: Record<string, SQL.Aliased>;
-
-  where?: {
-    (ctx: Context, table: Schema[K], ops: Operators): SQL | undefined;
-  };
-
-  orderBy?: Record<string, "asc" | "desc" | 1 | -1>;
-
-  with?: {
-    [N in keyof Schema as N extends keyof InferQueryRelations<K, Database>
-      ? N
-      : never]?: ACLWith<Context, Schema, Database, Transaction, Query, N, P>;
-  };
-
-  // used to do custom validation and parsing on body
-  validateBody?: <B extends Record<string, unknown>>(
-    body: B,
-    ctx: Context,
-  ) =>
-    | Record<string, unknown>
-    | ArkErrors
-    | Promise<Record<string, unknown> | ArkErrors>;
-
-  // used to do transform/edit on body
-  injectBody?: <B extends Record<string, unknown>>(
-    body: B,
-    ctx: Context,
-  ) =>
-    | Record<string, unknown>
-    | Array<Record<string, unknown>>
-    | Promise<Record<string, unknown> | Array<Record<string, unknown>>>;
-
-  // called before querying or inserting or updating in the database
-  beforeQuery?: (ctx: Context & CTXTX<Transaction>) => void | Promise<void>;
-
-  // called after querying or inserting or updating in the database
-  afterQuery?: (ctx: Context & CTXTX<Transaction>) => void | Promise<void>;
-
-  // called after an error occured while trying to execute query in the database
-  onQueryError?: (
-    error: HttpError | Error,
-    ctx: Context &
-      CTXTX<Transaction> & {
-        dontThrow?: boolean;
-      },
-  ) => Response | void | Promise<Response | void>;
-};
-
-export type ACLWith<
-  Context,
-  Schema extends Record<string, Table>,
-  Database extends { transaction: any; query: any },
-  Transaction extends InferTransaction<Database>,
-  Query extends InferQuery<Database>,
-  K extends keyof Schema,
-  P extends keyof _ACLWith<
-    Context,
-    Schema,
-    Database,
-    Transaction,
-    Query,
-    K,
-    | "forbidQuery"
-    | "maxLimit"
-    | "maxDepth"
-    | "select"
-    | "extras"
-    | "where"
-    | "orderBy"
-    | "with"
-    | "validateBody"
-    | "injectBody"
-    | "beforeQuery"
-    | "afterQuery"
-    | "onQueryError"
-  >,
-> = Pick<_ACLWith<Context, Schema, Database, Transaction, Query, K, P>, P> & {
-  formatResult?: RequestHandler<Context>;
-};
-
-export type ACLEntry<
-  Role extends string,
-  Context,
-  Schema extends Record<string, Table>,
-  Database extends { transaction: any; query: any },
-  Transaction extends InferTransaction<Database>,
-  Query extends InferQuery<Database>,
-  K extends keyof Schema,
-> = {
-  table: K;
-  findFirst?: boolean;
-  countTotal?: boolean;
-  maxLimit?: number | null;
-  maxDepth?: number | null;
-  formatResult?: RequestHandler<Context>;
-  control: {
-    HEAD?: Partial<
-      Record<
-        BASIC_ROLES | Role,
-        ACLWith<
-          Context,
-          Schema,
-          Database,
-          Transaction,
-          Query,
-          K,
-          | "forbidQuery"
-          | "maxLimit"
-          | "maxDepth"
-          | "select"
-          | "where"
-          | "with"
-          | "beforeQuery"
-          | "afterQuery"
-          | "onQueryError"
-        >
-      >
-    >;
-    GET?: Partial<
-      Record<
-        BASIC_ROLES | Role,
-        ACLWith<
-          Context,
-          Schema,
-          Database,
-          Transaction,
-          Query,
-          K,
-          | "forbidQuery"
-          | "maxLimit"
-          | "maxDepth"
-          | "select"
-          | "where"
-          | "with"
-          | "beforeQuery"
-          | "afterQuery"
-          | "onQueryError"
-        >
-      >
-    >;
-    POST?: Partial<
-      Record<
-        BASIC_ROLES | Role,
-        ACLWith<
-          Context,
-          Schema,
-          Database,
-          Transaction,
-          Query,
-          K,
-          | "forbidQuery"
-          | "select"
-          | "where"
-          | "validateBody"
-          | "injectBody"
-          | "beforeQuery"
-          | "afterQuery"
-          | "onQueryError"
-        >
-      >
-    >;
-    PATCH?: Partial<
-      Record<
-        BASIC_ROLES | Role,
-        ACLWith<
-          Context,
-          Schema,
-          Database,
-          Transaction,
-          Query,
-          K,
-          | "forbidQuery"
-          | "select"
-          | "where"
-          | "validateBody"
-          | "injectBody"
-          | "beforeQuery"
-          | "afterQuery"
-          | "onQueryError"
-        >
-      >
-    >;
-    DELETE?: Partial<
-      Record<
-        BASIC_ROLES | Role,
-        ACLWith<
-          Context,
-          Schema,
-          Database,
-          Transaction,
-          Query,
-          K,
-          | "forbidQuery"
-          | "select"
-          | "where"
-          | "beforeQuery"
-          | "afterQuery"
-          | "onQueryError"
-        >
-      >
-    >;
-  };
-};
-
-export type _ACL<
-  Role extends string,
-  CTXSession extends object,
-  XContext,
-  Schema extends Record<string, Table>,
-  Database extends { transaction: any; query: any },
-  Transaction extends InferTransaction<Database> = InferTransaction<Database>,
-  Query extends InferQuery<Database> = InferQuery<Database>,
-> = {
-  [K in keyof Schema as Schema[K] extends Table ? string : never]?: ACLEntry<
-    Role,
-    CTXSession & XContext & CTXACLCommon<Role> & CTXACLResult<Schema, K>,
-    Schema,
-    Database,
-    Transaction,
-    Query,
-    K
-  >;
-};
-
-export type ACL<
-  Role extends string,
-  CTXSession extends object,
-  XContext,
-  Schema extends Record<string, Table | unknown>,
-  Database extends { transaction: any; query: any },
-  Transaction extends InferTransaction<Database> = InferTransaction<Database>,
-  Query extends InferQuery<Database> = InferQuery<Database>,
-> = _ACL<
-  Role,
-  CTXSession,
-  XContext,
-  PickTables<Schema>,
-  Database,
-  Transaction,
-  Query
->;
-
-export type Routes = {
-  [M in HttpMethod]?: (
-    req: Request & { params: Record<string, string> },
-  ) => Promise<Response>;
-};
-
-const QueryScope = scope({
-  GetSelector: {
-    "offset?": "number",
-    "limit?": "number",
-    "columns?": "Record<string,boolean> | boolean",
-    "where?": "Record<string, unknown> | Record<string, unknown>[]",
-    "orderBy?": "Record<string, 'asc' | 'desc' | 1 | -1>",
-    "with?": {
-      "[string]": "GetSelector|boolean",
-    },
-    "+": "reject",
-  },
-  PostSelector: {
-    "columns?": "Record<string,boolean> | boolean",
-    "+": "reject",
-  },
-  PatchSelector: {
-    "columns?": "Record<string,boolean> | boolean",
-    "where?": "Record<string, unknown> | Record<string, unknown>[]",
-    "+": "reject",
-  },
-  DeleteSelector: {
-    "columns?": "Record<string,boolean> | boolean",
-    "where?": "Record<string, unknown> | Record<string, unknown>[]",
-    "+": "reject",
-  },
-});
-
-export const TSelectorGet = QueryScope.type("GetSelector");
-
-export type SelectorGet = typeof TSelectorGet.infer;
-
-export const TSelectorPost = QueryScope.type("PostSelector");
-
-export type SelectorPost = typeof TSelectorPost.infer;
-
-export const TSelectorPatch = QueryScope.type("PatchSelector");
-
-export type SelectorPatch = typeof TSelectorPatch.infer;
-
-export const TSelectorDelete = QueryScope.type("DeleteSelector");
-
-export type SelectorDelete = typeof TSelectorDelete.infer;
-
-const TOptionsQuery = type(
-  type({
-    "guest?": type("'T'|'F'|''")
-      .pipe((args: string) => args.charCodeAt(0) !== 70)
-      .to("boolean"),
-    "mine?": type("'T'|'F'|''")
-      .pipe((args: string) => args.charCodeAt(0) !== 70)
-      .to("boolean"),
-    "mine|guest?": type("'T'|'F'|''")
-      .pipe((args: string) => args.charCodeAt(0) !== 70)
-      .to("boolean"),
-  }),
-);
-
-export type OptionsQuery = typeof TOptionsQuery.infer;
-
-type CTXOptionsQuery = {
-  query: OptionsQuery;
-};
-
-const TGetQuery = type({
-  "findFirst?": type("'T'|'F'|''")
-    .pipe((args: string) => args.charCodeAt(0) !== 70)
-    .to("boolean"),
-  "guest?": type("'T'|'F'|''")
-    .pipe((args: string) => args.charCodeAt(0) !== 70)
-    .to("boolean"),
-  "mine?": type("'T'|'F'|''")
-    .pipe((args: string) => args.charCodeAt(0) !== 70)
-    .to("boolean"),
-  "mine|guest?": type("'T'|'F'|''")
-    .pipe((args: string) => args.charCodeAt(0) !== 70)
-    .to("boolean"),
-  "countTotal?": type("'T'|'F'|''")
-    .pipe((args: string) => args.charCodeAt(0) !== 70)
-    .to("boolean"),
-  "select?": type("string")
-    .pipe((args: string) => RJSON.parse(args))
-    .to(TSelectorGet),
-});
-
-export type GetQuery = typeof TGetQuery.infer;
-
-type CTXGetQuery = {
-  query: GetQuery;
-};
-
-const TPostQuery = type(
-  type({
-    "guest?": type("'T'|'F'|''")
-      .pipe((args: string) => args.charCodeAt(0) !== 70)
-      .to("boolean"),
-    "mine?": type("'T'|'F'|''")
-      .pipe((args: string) => args.charCodeAt(0) !== 70)
-      .to("boolean"),
-    "mine|guest?": type("'T'|'F'|''")
-      .pipe((args: string) => args.charCodeAt(0) !== 70)
-      .to("boolean"),
-    "countTotal?": type("'T'|'F'|''")
-      .pipe((args: string) => args.charCodeAt(0) !== 70)
-      .to("boolean"),
-    "select?": type("string")
-      .pipe((args: string) => RJSON.parse(args))
-      .to(TSelectorPost),
-  }),
-);
-
-export type PostQuery = typeof TPostQuery.infer;
-
-type CTXPostQuery = {
-  query: PostQuery;
-};
-
-export const TPostBody = type(
-  "Record<string, unknown>|Record<string, unknown>[]",
-);
-
-export type PostBody = typeof TPostBody.infer;
-
-export type CTXPostBody = {
-  body: PostBody;
-};
-
-const TPatchQuery = type(
-  type({
-    "guest?": type("'T'|'F'|''")
-      .pipe((args: string) => args.charCodeAt(0) !== 70)
-      .to("boolean"),
-    "mine?": type("'T'|'F'|''")
-      .pipe((args: string) => args.charCodeAt(0) !== 70)
-      .to("boolean"),
-    "mine|guest?": type("'T'|'F'|''")
-      .pipe((args: string) => args.charCodeAt(0) !== 70)
-      .to("boolean"),
-    "countTotal?": type("'T'|'F'|''")
-      .pipe((args: string) => args.charCodeAt(0) !== 70)
-      .to("boolean"),
-    "select?": type("string")
-      .pipe((args: string) => RJSON.parse(args))
-      .to(TSelectorPatch),
-  }),
-);
-
-export type PatchQuery = typeof TPatchQuery.infer;
-
-type CTXPatchQuery = {
-  query: PatchQuery;
-};
-
-export const TPatchBody = type("Record<string, unknown>");
-
-export type PatchBody = typeof TPatchBody.infer;
-
-export type CTXPatchBody = {
-  body: PatchBody;
-};
-
-const TDeleteQuery = type(
-  type({
-    "guest?": type("'T'|'F'|''")
-      .pipe((args: string) => args.charCodeAt(0) !== 70)
-      .to("boolean"),
-    "mine?": type("'T'|'F'|''")
-      .pipe((args: string) => args.charCodeAt(0) !== 70)
-      .to("boolean"),
-    "mine|guest?": type("'T'|'F'|''")
-      .pipe((args: string) => args.charCodeAt(0) !== 70)
-      .to("boolean"),
-    "countTotal?": type("'T'|'F'|''")
-      .pipe((args: string) => args.charCodeAt(0) !== 70)
-      .to("boolean"),
-    "select?": type("string")
-      .pipe((args: string) => RJSON.parse(args))
-      .to(TSelectorDelete),
-  }),
-);
-
-export type DeleteQuery = typeof TDeleteQuery.infer;
-
-type CTXDeleteQuery = {
-  query: DeleteQuery;
-};
-
-export enum SurpassMaxLimit {
-  Limit = 0,
-  Throw,
-}
-
-/**
- * Context object containing parsed request body.
- * @type {Object} CTXBody
- * @property {ParsedBody} body - Parsed request body data
- */
-export type CTXBody = {
-  body: any;
-};
-
-/**
- * Supported media types for request body parsing.
- * @type {"application/x-www-form-urlencoded"|"application/json"|"text/plain"} SupportedBodyMediaTypes
- */
-export type SupportedBodyMediaTypes =
-  | "application/x-www-form-urlencoded"
-  | "application/json"
-  | "application/rjson";
-
-/**
- * Creates middleware that parses the request body based on Content-Type.
- * Supports url-encoded forms, JSON, and plain text.
- * @param {Object} [options] - Configuration options for body parsing
- * @param {SupportedBodyMediaTypes|SupportedBodyMediaTypes[]} [options.accept] - Media types to accept (defaults to all supported)
- * @param {number} [options.maxSize] - Maximum body size in bytes (defaults to 1MB)
- * @param {number} [options.once] - Do not parse if parsed already. checks `ctx.body`
- * @param {number} [options.clone] - Clone request before parsing it. Useful for forwarding.
- * @returns {Function} A middleware function that adds parsed body to context.body
- * @throws {Response} Returns a 415 response if content-type is not accepted
- * @throws {Response} Returns a 413 response if body exceeds maxSize
- * @throws {Response} Returns a 400 response if body is malformed
- */
-export const parseBody = <XContext = Record<string, never>>(options?: {
-  accept?: SupportedBodyMediaTypes | SupportedBodyMediaTypes[]; // defaults to all
-  maxSize?: number; // in bytes
-  once?: boolean;
-  clone?: boolean;
-}): RequestHandler<XContext & CTXBody> => {
-  const accept = options?.accept
-    ? Array.isArray(options.accept)
-      ? options.accept
-      : [options.accept]
-    : ([
-        "application/x-www-form-urlencoded",
-        "application/json",
-        "application/rjson",
-      ] as string[]);
-  const maxSize = options?.maxSize ?? 1024 * 1024; // Default 1MB
-  const once = options?.once;
-  const clone = options?.clone;
-  return async (_req: Request, ctx: XContext & CTXBody) => {
-    if (once && ctx.body) return;
-    const contentType = _req.headers.get("content-type")?.split(";", 2)[0];
-    if (!(contentType && accept.includes(contentType))) {
-      await cancelRequestBody(_req);
-      return json(
-        { error: "Unsupported Media Type" },
-        { status: Status._415_UnsupportedMediaType },
-      );
-    }
-    const req = clone ? _req.clone() : _req;
-    try {
-      const contentLengthHeader = req.headers.get("content-length");
-      const contentLength = contentLengthHeader
-        ? parseInt(contentLengthHeader)
-        : undefined;
-      if (contentLength === 0) {
-        ctx.body = undefined;
-        return;
-      }
-      if (contentLength !== undefined && contentLength > maxSize) {
-        await cancelRequestBody(_req);
-        return json(
-          { error: "Payload Too Large" },
-          { status: Status._413_PayloadTooLarge },
-        );
-      }
-      switch (contentType) {
-        case "application/x-www-form-urlencoded": {
-          const body = await req.formData();
-          ctx.body = {};
-          for (const [k, v] of body.entries()) {
-            ctx.body[k] = v;
-          }
-          break;
-        }
-        case "application/json": {
-          ctx.body = await req.json();
-          break;
-        }
-        case "application/rjson":
-          ctx.body = RJSON.parse(await req.text());
-          break;
-        default:
-          ctx.body = undefined;
-          break;
-      }
-    } catch {
-      await cancelRequestBody(_req);
-      return json(
-        { error: "Malformed Payload" },
-        { status: Status._400_BadRequest },
-      );
-    }
-  };
-};
+  json,
+  status,
+  Status,
+  SurpassMaxLimit,
+  HttpError,
+  operators,
+  parseBody,
+} from "./utils.ts";
 
 export const createQueryRoute = <
   Role extends string,
@@ -1700,7 +898,7 @@ export const createQueryRoute = <
           Query,
           keyof Schema
         >);
-      if (!validateAclEntry(aclEntry)) {
+      if (aclEntry == null) {
         return json(
           {
             error: "Resource not found",
@@ -1710,7 +908,7 @@ export const createQueryRoute = <
           },
         );
       }
-      const aclRule = getAclRule(aclEntry, "POST");
+      const aclRule = aclEntry.control.POST;
       if (aclRule == null) {
         return json(
           {
@@ -1721,7 +919,15 @@ export const createQueryRoute = <
           },
         );
       }
-      const aclSelector = resolveAclSelector(aclRule, ctx.userRole, query);
+      const aclSelector =
+        (query["mine|guest"]
+          ? ((ctx.userRole && (aclRule[ctx.userRole] ?? aclRule.mine)) ??
+            aclRule.guest)
+          : query.guest
+            ? aclRule.guest
+            : ctx.userRole
+              ? (aclRule[ctx.userRole] ?? aclRule.mine)
+              : aclRule.guest) ?? aclRule.all;
       if (!aclSelector) {
         return json(
           {
@@ -1782,14 +988,41 @@ export const createQueryRoute = <
               ctx.body;
             const validateBody = aclSelector.validateBody;
             const injectBody = aclSelector.injectBody;
-            body = await applyBodyTransform(
-              body,
-              validateBody,
-              injectBody,
-              ctx,
-              HttpError,
-              Status._400_BadRequest,
-            );
+            if (validateBody != null) {
+              if (Array.isArray(body)) {
+                for (let i = 0; i < body.length; i++) {
+                  const vb = await validateBody(
+                    body[i] as Record<string, unknown>,
+                    ctx,
+                  );
+                  if (vb instanceof ArkErrors) {
+                    throw new HttpError(vb.toString(), Status._400_BadRequest);
+                  }
+                  body[i] = vb;
+                }
+              } else {
+                const vb = await validateBody(body, ctx);
+                if (vb instanceof ArkErrors) {
+                  throw new HttpError(vb.toString(), Status._400_BadRequest);
+                  // throw vb;
+                }
+                body = vb;
+              }
+            }
+            if (injectBody != null) {
+              if (Array.isArray(body)) {
+                for (let i = 0; i < body.length; i++) {
+                  const vb = await injectBody(
+                    body[i] as Record<string, unknown>,
+                    ctx,
+                  );
+                  if (vb != null) body[i] = vb as Record<string, unknown>;
+                }
+              } else {
+                const vb = await injectBody(body, ctx);
+                if (vb != null) body = vb as Record<string, unknown>;
+              }
+            }
             ctx.body = body;
             if (aclSelector.beforeQuery) {
               await aclSelector.beforeQuery(
@@ -1950,7 +1183,7 @@ export const createQueryRoute = <
           Query,
           keyof Schema
         >);
-      if (!validateAclEntry(aclEntry)) {
+      if (aclEntry == null) {
         return json(
           {
             error: "Resource not found",
@@ -1960,7 +1193,7 @@ export const createQueryRoute = <
           },
         );
       }
-      const aclRule = getAclRule(aclEntry, "PATCH");
+      const aclRule = aclEntry.control.PATCH;
       if (aclRule == null) {
         return json(
           {
@@ -1971,7 +1204,15 @@ export const createQueryRoute = <
           },
         );
       }
-      const aclSelector = resolveAclSelector(aclRule, ctx.userRole, query);
+      const aclSelector =
+        (query["mine|guest"]
+          ? ((ctx.userRole && (aclRule[ctx.userRole] ?? aclRule.mine)) ??
+            aclRule.guest)
+          : query.guest
+            ? aclRule.guest
+            : ctx.userRole
+              ? (aclRule[ctx.userRole] ?? aclRule.mine)
+              : aclRule.guest) ?? aclRule.all;
       if (!aclSelector) {
         return json(
           {
@@ -2031,14 +1272,17 @@ export const createQueryRoute = <
             let body: Record<string, unknown> = ctx.body;
             const validateBody = aclSelector.validateBody;
             const injectBody = aclSelector.injectBody;
-            body = await applyBodyTransform(
-              body,
-              validateBody,
-              injectBody,
-              ctx,
-              HttpError,
-              Status._400_BadRequest,
-            );
+            if (validateBody != null) {
+              const vb = await validateBody(body, ctx);
+              if (vb instanceof ArkErrors) {
+                throw new HttpError(vb.toString(), Status._400_BadRequest);
+              }
+              body = vb;
+            }
+            if (injectBody != null) {
+              const vb = await injectBody(body, ctx);
+              if (vb != null) body = vb as Record<string, unknown>;
+            }
             ctx.body = body;
             if (aclSelector.beforeQuery) {
               await aclSelector.beforeQuery(
