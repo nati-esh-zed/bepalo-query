@@ -6,6 +6,14 @@ import {
   type InferSelectModel,
   type Operators,
 } from "drizzle-orm";
+import {
+  cancelRequestBody,
+  validateAclEntry,
+  validateTable,
+  getAclRule,
+  resolveAclSelector,
+  applyBodyTransform,
+} from "./utils";
 
 export enum Status {
   _100_Continue = 100,
@@ -777,7 +785,7 @@ export const parseBody = <XContext = Record<string, never>>(options?: {
     if (once && ctx.body) return;
     const contentType = _req.headers.get("content-type")?.split(";", 2)[0];
     if (!(contentType && accept.includes(contentType))) {
-      await _req.body?.cancel().catch(() => {});
+      await cancelRequestBody(_req);
       return json(
         { error: "Unsupported Media Type" },
         { status: Status._415_UnsupportedMediaType },
@@ -794,7 +802,7 @@ export const parseBody = <XContext = Record<string, never>>(options?: {
         return;
       }
       if (contentLength !== undefined && contentLength > maxSize) {
-        await _req.body?.cancel().catch(() => {});
+        await cancelRequestBody(_req);
         return json(
           { error: "Payload Too Large" },
           { status: Status._413_PayloadTooLarge },
@@ -821,7 +829,7 @@ export const parseBody = <XContext = Record<string, never>>(options?: {
           break;
       }
     } catch {
-      await _req.body?.cancel().catch(() => {});
+      await cancelRequestBody(_req);
       return json(
         { error: "Malformed Payload" },
         { status: Status._400_BadRequest },
@@ -1692,7 +1700,7 @@ export const createQueryRoute = <
           Query,
           keyof Schema
         >);
-      if (aclEntry == null) {
+      if (!validateAclEntry(aclEntry)) {
         return json(
           {
             error: "Resource not found",
@@ -1702,7 +1710,7 @@ export const createQueryRoute = <
           },
         );
       }
-      const aclRule = aclEntry.control.POST;
+      const aclRule = getAclRule(aclEntry, "POST");
       if (aclRule == null) {
         return json(
           {
@@ -1713,15 +1721,7 @@ export const createQueryRoute = <
           },
         );
       }
-      const aclSelector =
-        (query["mine|guest"]
-          ? ((ctx.userRole && (aclRule[ctx.userRole] ?? aclRule.mine)) ??
-            aclRule.guest)
-          : query.guest
-            ? aclRule.guest
-            : ctx.userRole
-              ? (aclRule[ctx.userRole] ?? aclRule.mine)
-              : aclRule.guest) ?? aclRule.all;
+      const aclSelector = resolveAclSelector(aclRule, ctx.userRole, query);
       if (!aclSelector) {
         return json(
           {
@@ -1782,41 +1782,14 @@ export const createQueryRoute = <
               ctx.body;
             const validateBody = aclSelector.validateBody;
             const injectBody = aclSelector.injectBody;
-            if (validateBody != null) {
-              if (Array.isArray(body)) {
-                for (let i = 0; i < body.length; i++) {
-                  const vb = await validateBody(
-                    body[i] as Record<string, unknown>,
-                    ctx,
-                  );
-                  if (vb instanceof ArkErrors) {
-                    throw new HttpError(vb.toString(), Status._400_BadRequest);
-                  }
-                  body[i] = vb;
-                }
-              } else {
-                const vb = await validateBody(body, ctx);
-                if (vb instanceof ArkErrors) {
-                  throw new HttpError(vb.toString(), Status._400_BadRequest);
-                  // throw vb;
-                }
-                body = vb;
-              }
-            }
-            if (injectBody != null) {
-              if (Array.isArray(body)) {
-                for (let i = 0; i < body.length; i++) {
-                  const vb = await injectBody(
-                    body[i] as Record<string, unknown>,
-                    ctx,
-                  );
-                  if (vb != null) body[i] = vb as Record<string, unknown>;
-                }
-              } else {
-                const vb = await injectBody(body, ctx);
-                if (vb != null) body = vb as Record<string, unknown>;
-              }
-            }
+            body = await applyBodyTransform(
+              body,
+              validateBody,
+              injectBody,
+              ctx,
+              HttpError,
+              Status._400_BadRequest,
+            );
             ctx.body = body;
             if (aclSelector.beforeQuery) {
               await aclSelector.beforeQuery(
@@ -1977,7 +1950,7 @@ export const createQueryRoute = <
           Query,
           keyof Schema
         >);
-      if (aclEntry == null) {
+      if (!validateAclEntry(aclEntry)) {
         return json(
           {
             error: "Resource not found",
@@ -1987,7 +1960,7 @@ export const createQueryRoute = <
           },
         );
       }
-      const aclRule = aclEntry.control.PATCH;
+      const aclRule = getAclRule(aclEntry, "PATCH");
       if (aclRule == null) {
         return json(
           {
@@ -1998,15 +1971,7 @@ export const createQueryRoute = <
           },
         );
       }
-      const aclSelector =
-        (query["mine|guest"]
-          ? ((ctx.userRole && (aclRule[ctx.userRole] ?? aclRule.mine)) ??
-            aclRule.guest)
-          : query.guest
-            ? aclRule.guest
-            : ctx.userRole
-              ? (aclRule[ctx.userRole] ?? aclRule.mine)
-              : aclRule.guest) ?? aclRule.all;
+      const aclSelector = resolveAclSelector(aclRule, ctx.userRole, query);
       if (!aclSelector) {
         return json(
           {
@@ -2066,17 +2031,14 @@ export const createQueryRoute = <
             let body: Record<string, unknown> = ctx.body;
             const validateBody = aclSelector.validateBody;
             const injectBody = aclSelector.injectBody;
-            if (validateBody != null) {
-              const vb = await validateBody(body, ctx);
-              if (vb instanceof ArkErrors) {
-                throw new HttpError(vb.toString(), Status._400_BadRequest);
-              }
-              body = vb;
-            }
-            if (injectBody != null) {
-              const vb = await injectBody(body, ctx);
-              if (vb != null) body = vb as Record<string, unknown>;
-            }
+            body = await applyBodyTransform(
+              body,
+              validateBody,
+              injectBody,
+              ctx,
+              HttpError,
+              Status._400_BadRequest,
+            );
             ctx.body = body;
             if (aclSelector.beforeQuery) {
               await aclSelector.beforeQuery(
